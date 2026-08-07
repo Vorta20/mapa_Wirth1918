@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+        <meta name="mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <link rel="stylesheet" href="css/leaflet.css">
+        <link rel="stylesheet" href="css/L.Control.Layers.Tree.css">
+        <link rel="stylesheet" href="css/qgis2web.css">
+        <link rel="stylesheet" href="css/fontawesome-all.min.css">
+        <link rel="stylesheet" href="css/MarkerCluster.css">
+        <link rel="stylesheet" href="css/MarkerCluster.Default.css">
+        <link rel="stylesheet" href="css/filter.css">
+<link rel="stylesheet" href="css/nouislider.min.css">
+        <link rel="stylesheet" href="css/leaflet.photon.css">
+        <link rel="stylesheet" href="css/leaflet-measure.css">
+        <style>
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            margin: 0;
+        }
+        </style>
+        <title>Putování (1914-1918)</title>
+    </head>
+    <body>
+        <div id="map">
+        </div>
+        <script src="js/qgis2web_expressions.js"></script>
+        <script src="js/leaflet.js"></script>
+        <script src="js/L.Control.Layers.Tree.min.js"></script>
+        <script src="js/leaflet.rotatedMarker.js"></script>
+        <script src="js/leaflet.pattern.js"></script>
+        <script src="js/leaflet-hash.js"></script>
+        <script src="js/Autolinker.min.js"></script>
+        <script src="js/rbush.min.js"></script>
+        <script src="js/labelgun.min.js"></script>
+        <script src="js/labels.js"></script>
+        <script src="js/leaflet.photon.js"></script>
+        <script src="js/leaflet-measure.js"></script>
+        <script src="js/leaflet.markercluster.js"></script>
+        <script src="js/tailDT.js"></script>
+<script src="js/nouislider.min.js"></script>
+<script src="js/wNumb.js"></script>
+        <script src="data/Hranice_3.js"></script>
+        <script src="data/Pohybosob_4.js"></script>
+        <script src="data/Navtvenmsta_5.js"></script>
+        <script>
+        var map = L.map('map', {
+            zoomControl:false, maxZoom:11, minZoom:6
+        }).fitBounds([[39.847364885666494,2.1269113294695443],[56.95808935828474,36.000958361083455]]);
+        var hash = new L.Hash(map);
+        map.attributionControl.setPrefix('<a href="https://github.com/qgis2web/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
+        var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
+
+        // --- Vlastní úprava: sjednocení názvů atributů mezi vrstvou bodů a vrstvou tras,
+        //     aby filtr Rok / Jména fungoval na obou vrstvách stejně (qgis2web export
+        //     má u bodů atributy 'ROK' a 'Jméno', u linek 'Rok' a 'Jména ') ---
+        (function normalizeAttributesForFilter() {
+            if (typeof json_Navtvenmsta_5 === 'undefined') return;
+            json_Navtvenmsta_5.features.forEach(function (f) {
+                var p = f.properties;
+                if (p['ROK'] !== undefined && p['Rok'] === undefined) {
+                    p['Rok'] = p['ROK'];
+                }
+                if (p['Jméno'] !== undefined && p['Jména '] === undefined) {
+                    // "Zd. Wirth" -> "Wirth", ať sedí s hodnotami z vrstvy tras
+                    var parts = String(p['Jméno']).trim().split(' ');
+                    p['Jména '] = parts[parts.length - 1];
+                }
+            });
+        })();
+
+        // remove popup's row if "visible-with-data"
+        function removeEmptyRowsFromPopupContent(content, feature) {
+         var tempDiv = document.createElement('div');
+         tempDiv.innerHTML = content;
+         var rows = tempDiv.querySelectorAll('tr');
+         for (var i = 0; i < rows.length; i++) {
+             var td = rows[i].querySelector('td.visible-with-data');
+             var key = td ? td.id : '';
+             if (td && td.classList.contains('visible-with-data') && feature.properties[key] == null) {
+                 rows[i].parentNode.removeChild(rows[i]);
+             }
+         }
+         return tempDiv.innerHTML;
+        }
+        // modify popup if contains media
+        function addClassToPopupIfMedia(content, popup) {
+            var tempDiv = document.createElement('div');
+            tempDiv.innerHTML = content;
+            var imgTd = tempDiv.querySelector('td img');
+            if (imgTd) {
+                var src = imgTd.getAttribute('src');
+                if (/\.(jpg|jpeg|png|gif|bmp|webp|avif)$/i.test(src)) {
+                    popup._contentNode.classList.add('media');
+                    var img = popup._contentNode.querySelector('td img');
+                    if (img) {
+                        // If already loaded (cache), update immediately
+                        if (img.complete && img.naturalHeight > 0) {
+                            popup.update();
+                        } else {
+                            img.addEventListener('load', function() {
+                                popup.update();
+                            });
+                            img.addEventListener('error', function() {
+                                popup.update();
+                            });
+                        }
+                    }
+                } else if (/\.(mp3|wav|ogg|aac)$/i.test(src)) {
+                    var audio = document.createElement('audio');
+                    audio.controls = true;
+                    audio.src = src;
+                    imgTd.parentNode.replaceChild(audio, imgTd);
+                    popup._contentNode.classList.add('media');
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else if (/\.(mp4|webm|ogg|mov)$/i.test(src)) {
+                    var video = document.createElement('video');
+                    video.controls = true;
+                    video.src = src;
+                    video.style.width = "400px";
+                    video.style.height = "300px";
+                    video.style.maxHeight = "60vh";
+                    video.style.maxWidth = "60vw";
+                    imgTd.parentNode.replaceChild(video, imgTd);
+                    popup._contentNode.classList.add('media');
+                    // Aggiorna il popup quando il video carica i metadati
+                    video.addEventListener('loadedmetadata', function() {
+                        popup.update();
+                    });
+                    setTimeout(function() {
+                        popup.setContent(tempDiv.innerHTML);
+                        popup.update();
+                    }, 10);
+                } else {
+                    popup._contentNode.classList.remove('media');
+                }
+            } else {
+                popup._contentNode.classList.remove('media');
+            }
+        }
+        var title = new L.Control({'position':'topright'});
+        title.onAdd = function (map) {
+            this._div = L.DomUtil.create('div', 'info');
+            this.update();
+            return this._div;
+        };
+        title.update = function () {
+            this._div.innerHTML = '<h2>Putování (1914-1918)</h2>';
+        };
+        title.addTo(map);
+        var zoomControl = L.control.zoom({
+            position: 'topleft'
+        }).addTo(map);
+        var measureControl = new L.Control.Measure({
+            position: 'topleft',
+            primaryLengthUnit: 'meters',
+            secondaryLengthUnit: 'kilometers',
+            primaryAreaUnit: 'sqmeters',
+            secondaryAreaUnit: 'hectares'
+        });
+        measureControl.addTo(map);
+        document.getElementsByClassName('leaflet-control-measure-toggle')[0].innerHTML = '';
+        document.getElementsByClassName('leaflet-control-measure-toggle')[0].className += ' fas fa-ruler';
+        var bounds_group = new L.featureGroup([]);
+        function setBounds() {
+            map.setMaxBounds(map.getBounds());
+            map.setMinZoom(map.getZoom());
+        }
+        map.createPane('pane_OSMStandard_0');
+        map.getPane('pane_OSMStandard_0').style.zIndex = 400;
+        var layer_OSMStandard_0 = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            pane: 'pane_OSMStandard_0',
+            opacity: 1.0,
+            attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors, CC-BY-SA</a>',
+            minZoom: 6,
+            maxZoom: 11,
+            minNativeZoom: 0,
+            maxNativeZoom: 19
+        });
+        layer_OSMStandard_0;
+        map.addLayer(layer_OSMStandard_0);
+        map.createPane('pane_Podkladovmapa2_1');
+        map.getPane('pane_Podkladovmapa2_1').style.zIndex = 401;
+        var img_Podkladovmapa2_1 = 'data/Podkladovmapa2_1.png';
+        var img_bounds_Podkladovmapa2_1 = [[28.540125208999996,-13.931724787],[60.939460912,56.748032496]];
+        var layer_Podkladovmapa2_1 = new L.imageOverlay(img_Podkladovmapa2_1,
+                                              img_bounds_Podkladovmapa2_1,
+                                              {pane: 'pane_Podkladovmapa2_1'});
+        bounds_group.addLayer(layer_Podkladovmapa2_1);
+        map.addLayer(layer_Podkladovmapa2_1);
+        map.createPane('pane_ESRIShadedRelief_2');
+        map.getPane('pane_ESRIShadedRelief_2').style.zIndex = 402;
+        var layer_ESRIShadedRelief_2 = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', {
+            pane: 'pane_ESRIShadedRelief_2',
+            opacity: 0.601,
+            attribution: '',
+            minZoom: 6,
+            maxZoom: 11,
+            minNativeZoom: 0,
+            maxNativeZoom: 20
+        });
+        layer_ESRIShadedRelief_2;
+        map.addLayer(layer_ESRIShadedRelief_2);
+        function pop_Hranice_3(feature, layer) {
+            var popupContent = '<table>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['NAME'] !== null ? autolinker.link(String(feature.properties['NAME']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['ABBREVN'] !== null ? autolinker.link(String(feature.properties['ABBREVN']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['SUBJECTO'] !== null ? autolinker.link(String(feature.properties['SUBJECTO']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['BORDERPRECISION'] !== null ? autolinker.link(String(feature.properties['BORDERPRECISION']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['PARTOF'] !== null ? autolinker.link(String(feature.properties['PARTOF']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['auxiliary_storage_labeling_lineanchorpercent'] !== null ? autolinker.link(String(feature.properties['auxiliary_storage_labeling_lineanchorpercent']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['auxiliary_storage_labeling_lineanchorclipping'] !== null ? autolinker.link(String(feature.properties['auxiliary_storage_labeling_lineanchorclipping']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['auxiliary_storage_labeling_lineanchortype'] !== null ? autolinker.link(String(feature.properties['auxiliary_storage_labeling_lineanchortype']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['auxiliary_storage_labeling_lineanchortextpoint'] !== null ? autolinker.link(String(feature.properties['auxiliary_storage_labeling_lineanchortextpoint']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400 });
+        }
+
+        function style_Hranice_3_0() {
+            return {
+                pane: 'pane_Hranice_3',
+                opacity: 1,
+                color: 'rgba(0,0,0,1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 1.0, 
+                fillOpacity: 0,
+                interactive: false,
+            }
+        }
+        map.createPane('pane_Hranice_3');
+        map.getPane('pane_Hranice_3').style.zIndex = 403;
+        map.getPane('pane_Hranice_3').style['mix-blend-mode'] = 'normal';
+        var layer_Hranice_3 = new L.geoJson(json_Hranice_3, {
+            attribution: '',
+            interactive: false,
+            dataVar: 'json_Hranice_3',
+            layerName: 'layer_Hranice_3',
+            pane: 'pane_Hranice_3',
+            onEachFeature: pop_Hranice_3,
+            style: style_Hranice_3_0,
+        });
+        bounds_group.addLayer(layer_Hranice_3);
+        map.addLayer(layer_Hranice_3);
+        function pop_Pohybosob_4(feature, layer) {
+            var popupContent = '<table>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Rok'] !== null ? autolinker.link(String(feature.properties['Rok']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Jména '] !== null ? autolinker.link(String(feature.properties['Jména ']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400 });
+        }
+
+        function style_Pohybosob_4_0(feature) {
+            switch(String(feature.properties['q2wHide_jmeno'])) {
+                case 'Janak':
+                    return {
+                pane: 'pane_Pohybosob_4',
+                opacity: 1,
+                color: 'rgba(192,57,43,1.0)',
+                dashArray: '12.0,6.0',
+                lineCap: 'square',
+                lineJoin: 'bevel',
+                weight: 3.0,
+                fillOpacity: 0,
+                interactive: true,
+            }
+                    break;
+                case 'Kramar':
+                    return {
+                pane: 'pane_Pohybosob_4',
+                opacity: 1,
+                color: 'rgba(211,84,0,1.0)',
+                dashArray: '12.0,6.0',
+                lineCap: 'square',
+                lineJoin: 'bevel',
+                weight: 3.0,
+                fillOpacity: 0,
+                interactive: true,
+            }
+                    break;
+                case 'Matejcka':
+                    return {
+                pane: 'pane_Pohybosob_4',
+                opacity: 1,
+                color: 'rgba(27,79,114,1.0)',
+                dashArray: '12.0,6.0',
+                lineCap: 'square',
+                lineJoin: 'bevel',
+                weight: 3.0,
+                fillOpacity: 0,
+                interactive: true,
+            }
+                    break;
+                case 'Wirth':
+                    return {
+                pane: 'pane_Pohybosob_4',
+                opacity: 1,
+                color: 'rgba(118,68,138,1.0)',
+                dashArray: '12.0,6.0',
+                lineCap: 'square',
+                lineJoin: 'bevel',
+                weight: 3.0,
+                fillOpacity: 0,
+                interactive: true,
+            }
+                    break;
+            }
+        }
+        map.createPane('pane_Pohybosob_4');
+        map.getPane('pane_Pohybosob_4').style.zIndex = 404;
+        map.getPane('pane_Pohybosob_4').style['mix-blend-mode'] = 'normal';
+        var layer_Pohybosob_4 = new L.geoJson(json_Pohybosob_4, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_Pohybosob_4',
+            layerName: 'layer_Pohybosob_4',
+            pane: 'pane_Pohybosob_4',
+            onEachFeature: pop_Pohybosob_4,
+            style: style_Pohybosob_4_0,
+        });
+        bounds_group.addLayer(layer_Pohybosob_4);
+        function pop_Navtvenmsta_5(feature, layer) {
+            var popupContent = '<table>\
+                    <tr>\
+                        <th scope="row">Místo</th>\
+                        <td>' + (feature.properties['M�STO'] !== null ? autolinker.link(String(feature.properties['M�STO']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Rok</th>\
+                        <td>' + (feature.properties['ROK'] !== null ? autolinker.link(String(feature.properties['ROK']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Pořadí </th>\
+                        <td>' + (feature.properties['PORADI'] !== null ? autolinker.link(String(feature.properties['PORADI']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <th scope="row">Jméno</th>\
+                        <td>' + (feature.properties['Jméno'] !== null ? autolinker.link(String(feature.properties['Jméno']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['Druh'] !== null ? autolinker.link(String(feature.properties['Druh']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                </table>';
+            var content = removeEmptyRowsFromPopupContent(popupContent, feature);
+			layer.on('popupopen', function(e) {
+				addClassToPopupIfMedia(content, e.popup);
+			});
+			layer.bindPopup(content, { maxHeight: 400 });
+        }
+
+        function style_Navtvenmsta_5_0(feature) {
+            // Vlastní úprava: velikost a barva bodu podle pole 'Druh'
+            // 1 = počáteční bod cesty, 2 = koncový bod cesty, 3 = mezizastávka
+            var druh = feature ? String(feature.properties['Druh']) : '';
+            var radius = 6.0;
+            var fillColor = 'rgba(43,225,52,1.0)';
+            if (druh === '1') {
+                radius = 14.0;
+                fillColor = 'rgba(39,174,96,1.0)';
+            } else if (druh === '2') {
+                radius = 14.0;
+                fillColor = 'rgba(192,57,43,1.0)';
+            }
+            return {
+                pane: 'pane_Navtvenmsta_5',
+                radius: radius,
+                opacity: 1,
+                color: 'rgba(0,0,0,1.0)',
+                dashArray: '',
+                lineCap: 'butt',
+                lineJoin: 'miter',
+                weight: 1.0,
+                fill: true,
+                fillOpacity: 1,
+                fillColor: fillColor,
+                interactive: true,
+            }
+        }
+        map.createPane('pane_Navtvenmsta_5');
+        map.getPane('pane_Navtvenmsta_5').style.zIndex = 405;
+        map.getPane('pane_Navtvenmsta_5').style['mix-blend-mode'] = 'normal';
+        var layer_Navtvenmsta_5 = new L.geoJson(json_Navtvenmsta_5, {
+            attribution: '',
+            interactive: true,
+            dataVar: 'json_Navtvenmsta_5',
+            layerName: 'layer_Navtvenmsta_5',
+            pane: 'pane_Navtvenmsta_5',
+            onEachFeature: pop_Navtvenmsta_5,
+            pointToLayer: function (feature, latlng) {
+                var context = {
+                    feature: feature,
+                    variables: {}
+                };
+                return L.circleMarker(latlng, style_Navtvenmsta_5_0(feature));
+            },
+        });
+        var cluster_Navtvenmsta_5 = new L.MarkerClusterGroup({showCoverageOnHover: false,
+            spiderfyDistanceMultiplier: 2});
+        cluster_Navtvenmsta_5.addLayer(layer_Navtvenmsta_5);
+
+        bounds_group.addLayer(layer_Navtvenmsta_5);
+        cluster_Navtvenmsta_5.addTo(map);
+
+        // --- Vlastní úprava: šipky se směrem pohybu na trasách (Pohybosob_4) ---
+        // Barvy odpovídají barvám linek v style_Pohybosob_4_0.
+        var personColors_Pohybosob_4 = {
+            'Janak': 'rgba(192,57,43,1.0)',
+            'Kramar': 'rgba(211,84,0,1.0)',
+            'Matejcka': 'rgba(27,79,114,1.0)',
+            'Wirth': 'rgba(118,68,138,1.0)'
+        };
+        function bearingBetween(lat1, lon1, lat2, lon2) {
+            var toRad = function (d) { return d * Math.PI / 180; };
+            var toDeg = function (r) { return r * 180 / Math.PI; };
+            var dLon = toRad(lon2 - lon1);
+            var y = Math.sin(dLon) * Math.cos(toRad(lat2));
+            var x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLon);
+            return (toDeg(Math.atan2(y, x)) + 360) % 360;
+        }
+        function haversineKm(a, b) {
+            var R = 6371;
+            var toRad = function (d) { return d * Math.PI / 180; };
+            var dLat = toRad(b[1] - a[1]);
+            var dLon = toRad(b[0] - a[0]);
+            var lat1 = toRad(a[1]), lat2 = toRad(b[1]);
+            var h = Math.pow(Math.sin(dLat / 2), 2) +
+                    Math.cos(lat1) * Math.cos(lat2) * Math.pow(Math.sin(dLon / 2), 2);
+            return 2 * R * Math.asin(Math.sqrt(h));
+        }
+        function midpointWithBearing(coords) {
+            // coords: pole bodů [lon, lat] jedné linie (jeden úsek trasy)
+            if (!coords || coords.length < 2) return null;
+            var dist = [0];
+            for (var i = 1; i < coords.length; i++) {
+                dist.push(dist[i - 1] + haversineKm(coords[i - 1], coords[i]));
+            }
+            var half = dist[dist.length - 1] / 2;
+            var idx = 1;
+            while (idx < dist.length && dist[idx] < half) idx++;
+            var p1 = coords[idx - 1], p2 = coords[idx];
+            var segLen = dist[idx] - dist[idx - 1];
+            var t = segLen > 0 ? (half - dist[idx - 1]) / segLen : 0;
+            var lat = p1[1] + (p2[1] - p1[1]) * t;
+            var lon = p1[0] + (p2[0] - p1[0]) * t;
+            return {
+                latlng: L.latLng(lat, lon),
+                bearing: bearingBetween(p1[1], p1[0], p2[1], p2[0])
+            };
+        }
+        var layer_Pohybosob_4_arrows = L.layerGroup();
+        function rebuildArrows_Pohybosob_4() {
+            layer_Pohybosob_4_arrows.clearLayers();
+            layer_Pohybosob_4.eachLayer(function (lyr) {
+                var feature = lyr.feature;
+                if (!feature || !feature.geometry) return;
+                var color = personColors_Pohybosob_4[feature.properties['q2wHide_jmeno']] || 'rgba(60,60,60,1.0)';
+                feature.geometry.coordinates.forEach(function (lineCoords) {
+                    var arrow = midpointWithBearing(lineCoords);
+                    if (!arrow) return;
+                    var icon = L.divIcon({
+                        className: 'movement-arrow-icon',
+                        html: '<div style="width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;' +
+                              'border-bottom:13px solid ' + color + ';transform:rotate(' + arrow.bearing + 'deg);"></div>',
+                        iconSize: [14, 14],
+                        iconAnchor: [7, 7]
+                    });
+                    L.marker(arrow.latlng, { icon: icon, interactive: false, keyboard: false }).addTo(layer_Pohybosob_4_arrows);
+                });
+            });
+        }
+        rebuildArrows_Pohybosob_4();
+        layer_Pohybosob_4_arrows.addTo(map);
+        // Šipky nemají vlastní položku v přepínači vrstev - řídí se viditelností
+        // vrstvy "Pohyb osob" (layer_Pohybosob_4), zapnou/vypnou se s ní společně.
+        map.on('overlayadd', function (e) {
+            if (e.layer === layer_Pohybosob_4) {
+                layer_Pohybosob_4_arrows.addTo(map);
+            }
+        });
+        map.on('overlayremove', function (e) {
+            if (e.layer === layer_Pohybosob_4) {
+                map.removeLayer(layer_Pohybosob_4_arrows);
+            }
+        });
+
+        map.on("zoomend", function(e) {
+            if (map.getZoom() <= 6 && map.getZoom() >= 2) {
+                map.addLayer(layer_Podkladovmapa2_1);
+            } else if (map.getZoom() > 6 || map.getZoom() < 2) {
+                map.removeLayer(layer_Podkladovmapa2_1);
+            }
+            if (map.getZoom() <= 6 && map.getZoom() >= 2) {
+                map.addLayer(layer_ESRIShadedRelief_2);
+            } else if (map.getZoom() > 6 || map.getZoom() < 2) {
+                map.removeLayer(layer_ESRIShadedRelief_2);
+            }
+            if (map.getZoom() <= 7 && map.getZoom() >= 2) {
+                map.addLayer(layer_Hranice_3);
+            } else if (map.getZoom() > 7 || map.getZoom() < 2) {
+                map.removeLayer(layer_Hranice_3);
+            }
+        });
+            if (map.getZoom() <= 6 && map.getZoom() >= 2) {
+                map.addLayer(layer_Podkladovmapa2_1);
+            } else if (map.getZoom() > 6 || map.getZoom() < 2) {
+                map.removeLayer(layer_Podkladovmapa2_1);
+            }
+            if (map.getZoom() <= 6 && map.getZoom() >= 2) {
+                map.addLayer(layer_ESRIShadedRelief_2);
+            } else if (map.getZoom() > 6 || map.getZoom() < 2) {
+                map.removeLayer(layer_ESRIShadedRelief_2);
+            }
+            if (map.getZoom() <= 7 && map.getZoom() >= 2) {
+                map.addLayer(layer_Hranice_3);
+            } else if (map.getZoom() > 7 || map.getZoom() < 2) {
+                map.removeLayer(layer_Hranice_3);
+            }
+        var overlaysTree = [
+            {label: '<img src="legend/Navtvenmsta_5.png" /> Navštívená místa', layer: cluster_Navtvenmsta_5},
+            {label: 'Pohyb osob<br /><table><tr><td style="text-align: center;"><img src="legend/Pohybosob_4_Janák0.png" /></td><td>Janák</td></tr><tr><td style="text-align: center;"><img src="legend/Pohybosob_4_Kramář1.png" /></td><td>Kramář</td></tr><tr><td style="text-align: center;"><img src="legend/Pohybosob_4_Matějčka2.png" /></td><td>Matějčka</td></tr><tr><td style="text-align: center;"><img src="legend/Pohybosob_4_Wirth3.png" /></td><td>Wirth</td></tr></table>', layer: layer_Pohybosob_4},
+            {label: '<img src="legend/Hranice_3.png" /> Hranice', layer: layer_Hranice_3},
+            {label: "ESRI Shaded Relief", layer: layer_ESRIShadedRelief_2},
+            {label: "Podkladová mapa 2", layer: layer_Podkladovmapa2_1},
+            {label: "OSM Standard", layer: layer_OSMStandard_0},]
+        var lay = L.control.layers.tree(null, overlaysTree,{
+            //namedToggle: true,
+            //selectorBack: false,
+            //closedSymbol: '&#8862; &#x1f5c0;',
+            //openedSymbol: '&#8863; &#x1f5c1;',
+            //collapseAll: 'Collapse all',
+            //expandAll: 'Expand all',
+            collapsed: true,
+        });
+        lay.addTo(map);
+        setBounds();
+        var i = 0;
+        layer_Hranice_3.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['NAME'] !== null?String('<div style="color: #000000; font-size: 13pt; font-weight: bold; font-style: italic; font-family: \'Calibri\', sans-serif;">' + layer.feature.properties['NAME']) + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css_Hranice_3'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+        var mapDiv = document.getElementById('map');
+        var row = document.createElement('div');
+        row.className="row";
+        row.id="all";
+        row.style.height = "100%";
+        var col1 = document.createElement('div');
+        col1.className="col9";
+        col1.id = "mapWindow";
+        col1.style.height = "99%";
+        col1.style.width = "80%";
+        col1.style.display = "inline-block";
+        var col2 = document.createElement('div');
+        col2.className="col3";
+        col2.id = "menu";
+        col2.style.display = "inline-block";
+        mapDiv.parentNode.insertBefore(row, mapDiv);
+        document.getElementById("all").appendChild(col1);
+        document.getElementById("all").appendChild(col2);
+        col1.appendChild(mapDiv)
+        var Filters = {"Rok": "int","Jména ": "str"};
+        function filterFunc() {
+          map.eachLayer(function(lyr){
+          if ("options" in lyr && "dataVar" in lyr["options"]){
+            features = this[lyr["options"]["dataVar"]].features.slice(0);
+            try{
+              for (key in Filters){
+                keyS = key.replace(/[^a-zA-Z0-9_]/g, "")
+                if (Filters[key] == "str" || Filters[key] == "bool"){
+                  var selection = [];
+                  var options = document.getElementById("sel_" + keyS).options
+                  for (var i=0; i < options.length; i++) {
+                    if (options[i].selected) selection.push(options[i].value);
+                  }
+                    try{
+                      if (key in features[0].properties){
+                        for (i = features.length - 1;
+                          i >= 0; --i){
+                          if (selection.indexOf(
+                          features[i].properties[key])<0
+                          && selection.length>0) {
+                          features.splice(i,1);
+                          }
+                        }
+                      }
+                    } catch(err){
+                  }
+                }
+                if (Filters[key] == "int"){
+                  sliderVals =  document.getElementById(
+                    "div_" + keyS).noUiSlider.get();
+                  try{
+                    if (key in features[0].properties){
+                    for (i = features.length - 1; i >= 0; --i){
+                      if (parseInt(features[i].properties[key])
+                          < sliderVals[0]
+                          || parseInt(features[i].properties[key])
+                          > sliderVals[1]){
+                            features.splice(i,1);
+                          }
+                        }
+                      }
+                    } catch(err){
+                    }
+                  }
+                if (Filters[key] == "real"){
+                  sliderVals =  document.getElementById(
+                    "div_" + keyS).noUiSlider.get();
+                  try{
+                    if (key in features[0].properties){
+                    for (i = features.length - 1; i >= 0; --i){
+                      if (features[i].properties[key]
+                          < sliderVals[0]
+                          || features[i].properties[key]
+                          > sliderVals[1]){
+                            features.splice(i,1);
+                          }
+                        }
+                      }
+                    } catch(err){
+                    }
+                  }
+                if (Filters[key] == "date"
+                  || Filters[key] == "datetime"
+                  || Filters[key] == "time"){
+                  try{
+                    if (key in features[0].properties){
+                      HTMLkey = key.replace(/[&\\/\\#,+()$~%.'":*?<>{} ]/g, '');
+                      startdate = document.getElementById("dat_" +
+                        HTMLkey + "_date1").value.replace(" ", "T");
+                      enddate = document.getElementById("dat_" +
+                        HTMLkey + "_date2").value.replace(" ", "T");
+                      for (i = features.length - 1; i >= 0; --i){
+                        if (features[i].properties[key] < startdate
+                          || features[i].properties[key] > enddate){
+                          features.splice(i,1);
+                        }
+                      }
+                    }
+                  } catch(err){
+                  }
+                }
+              }
+            } catch(err){
+            }
+          this[lyr["options"]["layerName"]].clearLayers();
+          this[lyr["options"]["layerName"]].addData(features);
+          if (lyr["options"]["layerName"] === "layer_Pohybosob_4") {
+              rebuildArrows_Pohybosob_4();
+          }
+        var i = 0;
+        layer_Hranice_3.eachLayer(function(layer) {
+            var context = {
+                feature: layer.feature,
+                variables: {}
+            };
+            layer.bindTooltip((layer.feature.properties['NAME'] !== null?String('<div style="color: #000000; font-size: 13pt; font-weight: bold; font-style: italic; font-family: \'Calibri\', sans-serif;">' + layer.feature.properties['NAME']) + '</div>':''), {permanent: true, offset: [-0, -16], className: 'css_Hranice_3'});
+            labels.push(layer);
+            totalMarkers += 1;
+              layer.added = true;
+              addLabel(layer, i);
+              i++;
+        });
+          }
+          })
+        }
+            document.getElementById("menu").appendChild(
+                document.createElement("div"));
+            var div_Rok = document.createElement("div");
+            div_Rok.id = "div_Rok";
+            div_Rok.className = "slider";
+            document.getElementById("menu").appendChild(div_Rok);
+            var lab_Rok = document.createElement('div');
+            lab_Rok.innerHTML  = 'Rok: <span id="val_Rok"></span>';
+            lab_Rok.className = 'filterlabel';
+            document.getElementById("menu").appendChild(lab_Rok);
+            var reset_Rok = document.createElement('div');
+            reset_Rok.innerHTML = 'clear filter';
+            reset_Rok.className = 'filterlabel';
+            lab_Rok.className = 'filterlabel';
+            reset_Rok.onclick = function() {
+                sel_Rok.noUiSlider.reset();
+            };
+            document.getElementById("menu").appendChild(reset_Rok);
+            var sel_Rok = document.getElementById('div_Rok');
+            noUiSlider.create(sel_Rok, {
+                connect: true,
+                start: [1914, 1918],
+                step: 1,
+                format: wNumb({
+                    decimals: 0,
+                    }),
+                range: {
+                min: 1914,
+                max: 1918
+                }
+            });
+            sel_Rok.noUiSlider.on('update', function (values) {
+            filterVals =[];
+            for (value in values){
+            filterVals.push(parseInt(value))
+            }
+            val_Rok = document.getElementById('val_Rok');
+            val_Rok.innerHTML = values.join(' - ');
+                filterFunc()
+            });
+            document.getElementById("menu").appendChild(
+                document.createElement("div"));
+            var div_Jmna = document.createElement('div');
+            div_Jmna.id = "div_Jmna";
+            div_Jmna.className= "filterselect";
+            document.getElementById("menu").appendChild(div_Jmna);
+            sel_Jmna = document.createElement('select');
+            sel_Jmna.multiple = true;
+            sel_Jmna.size = 4;
+            sel_Jmna.id = "sel_Jmna";
+            var Jmna_options_str = "<option value='' unselected></option>";
+            sel_Jmna.onchange = function(){filterFunc()};
+            Jmna_options_str  += '<option value="Janák">Janák</option>';
+            Jmna_options_str  += '<option value="Kramář">Kramář</option>';
+            Jmna_options_str  += '<option value="Matějčka">Matějčka</option>';
+            Jmna_options_str  += '<option value="Wirth">Wirth</option>';
+            sel_Jmna.innerHTML = Jmna_options_str;
+            div_Jmna.appendChild(sel_Jmna);
+            var lab_Jmna = document.createElement('div');
+            lab_Jmna.innerHTML = 'Jména ';
+            lab_Jmna.className = 'filterlabel';
+            div_Jmna.appendChild(lab_Jmna);
+            var reset_Jmna = document.createElement('div');
+            reset_Jmna.innerHTML = 'clear filter';
+            reset_Jmna.className = 'filterlabel';
+            reset_Jmna.onclick = function() {
+                var options = document.getElementById("sel_Jmna").options;
+                for (var i=0; i < options.length; i++) {
+                    options[i].selected = false;
+                }
+                filterFunc();
+            };
+            div_Jmna.appendChild(reset_Jmna);
+        L.ImageOverlay.include({
+            getBounds: function () {
+                return this._bounds;
+            }
+        });
+        resetLabels([layer_Hranice_3,layer_Navtvenmsta_5]);
+        map.on("zoomend", function(){
+            resetLabels([layer_Hranice_3,layer_Navtvenmsta_5]);
+        });
+        map.on("layeradd", function(){
+            resetLabels([layer_Hranice_3,layer_Navtvenmsta_5]);
+        });
+        map.on("layerremove", function(){
+            resetLabels([layer_Hranice_3,layer_Navtvenmsta_5]);
+        });
+        </script>        
+    </body>
+</html>
